@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -10,8 +11,25 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-console.log(process.env.DB_USER);
+// require('crypto').randomBytes(64).toString('hex');
 
+// jwt verify middleware
+const verifyJWT = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(403).send({ message: 'unauthorized access' })
+  }
+
+  const token = authHeader.split(' ')[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).send({ message: 'unauthorized access' })
+    }
+    req.decoded = decoded;
+    next();
+  })
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.n9sry.mongodb.net/?retryWrites=true&w=majority`;
 
@@ -21,6 +39,16 @@ const run = async () => {
   try {
     const serviceCollection = client.db('geniusCar').collection('services')
     const ordersCollection = client.db('geniusCar').collection("orders");
+
+    app.post('/jwt', (req, res) => {
+      const user = req.body;
+      // console.log(user);
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: '1d'
+      })
+
+      res.send({ token })
+    })
 
     // get all services
     app.get('/services', async (req, res) => {
@@ -42,7 +70,13 @@ const run = async () => {
     })
 
     // orders api
-    app.get('/orders', async (req, res) => {
+    app.get('/orders', verifyJWT, async (req, res) => {
+      const decoded = req.decoded;
+      // console.log(decoded);
+
+      if (decoded.email !== req.query.email) {
+        return res.status(403).send({ message: 'unauthorized access' });
+      }
 
       let query = {};
       if (req.query.email) {
@@ -58,16 +92,19 @@ const run = async () => {
       res.send(orders);
     })
 
-    app.post('/orders', async (req, res) => {
+    app.post('/orders', verifyJWT, async (req, res) => {
       const order = req.body;
+
       const result = await ordersCollection.insertOne(order);
 
       res.send(result);
     })
 
-    app.patch('/orders/:id', async (req, res) => {
+    app.patch('/orders/:id', verifyJWT, async (req, res) => {
       const id = req.params.id;
       const status = req.body.status;
+
+      console.log(req.body);
 
       const filter = { _id: ObjectId(id) }
       const updateDoc = {
@@ -81,7 +118,7 @@ const run = async () => {
       res.send(result);
     })
 
-    app.delete('/orders/:id', async (req, res) => {
+    app.delete('/orders/:id', verifyJWT, async (req, res) => {
       const id = req.params.id;
       const query = { _id: ObjectId(id) }
 
@@ -94,7 +131,7 @@ const run = async () => {
   }
 }
 
-run().catch(console.dir)
+run().catch(err => console.error(err))
 
 
 
